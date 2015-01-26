@@ -457,19 +457,12 @@ _.extend(Isopack.prototype, {
           options = {};
         }
 
-        if (_.has(self.sourceHandlers, extension)) {
-          buildmessage.error("duplicate handler for '*." +
-                             extension + "'; may only have one per Plugin",
-                             { useMyCaller: true });
-          // recover by ignoring all but the first
-          return;
-        }
-
-        self.sourceHandlers[extension] = {
+        if(! self.sourceHandlers[extension] instanceof Array) self.sourceHandlers[extension] = [];
+        self.sourceHandlers[extension].push({
           handler: handler,
           isTemplate: !!options.isTemplate,
           archMatching: options.archMatching
-        };
+        });
       }
     };
 

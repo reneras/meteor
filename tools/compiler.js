@@ -228,7 +228,7 @@ var compileUnibuild = function (options) {
   var sourceExtensions = {};  // maps source extensions to isTemplate
 
   sourceExtensions['js'] = false;
-  allHandlersWithPkgs['js'] = {
+  allHandlersWithPkgs['js'] = [{
     pkgName: null /* native handler */,
     handler: function (compileStep) {
       // This is a hardcoded handler for *.js files. Since plugins
@@ -251,36 +251,28 @@ var compileUnibuild = function (options) {
 
       compileStep.addJavaScript(options);
     }
-  };
+  }];
 
   _.each(activePluginPackages, function (otherPkg) {
-    _.each(otherPkg.getSourceHandlers(), function (sourceHandler, ext) {
-      // XXX comparing function text here seems wrong.
-      if (_.has(allHandlersWithPkgs, ext) &&
-          allHandlersWithPkgs[ext].handler.toString() !== sourceHandler.handler.toString()) {
-        buildmessage.error(
-          "conflict: two packages included in " +
-            (inputSourceArch.pkg.name || "the app") + ", " +
-            (allHandlersWithPkgs[ext].pkgName || "the app") + " and " +
-            (otherPkg.name || "the app") + ", " +
-            "are both trying to handle ." + ext);
-        // Recover by just going with the first handler we saw
-        return;
-      }
-      // Is this handler only registered for, say, "web", and we're building,
-      // say, "os"?
-      if (sourceHandler.archMatching &&
-          !archinfo.matches(inputSourceArch.arch, sourceHandler.archMatching)) {
-        return;
-      }
-      allHandlersWithPkgs[ext] = {
-        pkgName: otherPkg.name,
-        handler: sourceHandler.handler
-      };
-      sourceExtensions[ext] = !!sourceHandler.isTemplate;
+    _.each(otherPkg.getSourceHandlers(), function (sourceHandlers) {
+      _.each(sourceHandlers, function(sourceHandler, ext) {
+        // Is this handler only registered for, say, "web", and we're building,
+        // say, "os"?
+        if (sourceHandler.archMatching && !archinfo.matches(inputSourceArch.arch, sourceHandler.archMatching)) {
+          return;
+        }
+
+        if(! allHandlersWithPkgs[ext] instanceof Array) allHandlersWithPkgs[ext] = [];
+        allHandlersWithPkgs[ext].push({
+          pkgName: otherPkg.name,
+          handler: sourceHandler.handler
+        });
+        // We only have to invert isTemplate to true once, when it's false.
+        if(! sourceHandler.isTemplate)
+          sourceExtensions[ext] = !!sourceHandler.isTemplate;
+      });
     });
   });
-
   // *** Determine source files
   // Note: sourceExtensions does not include leading dots
   // Note: the getSourcesFunc function isn't expected to add its
@@ -339,19 +331,19 @@ var compileUnibuild = function (options) {
     }
 
     // Find the handler for source files with this extension.
-    var handler = null;
+    var handlers = null;
     if (! fileOptions.isAsset) {
       var parts = filename.split('.');
       for (var i = 0; i < parts.length; i++) {
         var extension = parts.slice(i).join('.');
         if (_.has(allHandlersWithPkgs, extension)) {
-          handler = allHandlersWithPkgs[extension].handler;
+          handlers = allHandlersWithPkgs[extension];
           break;
         }
       }
     }
 
-    if (! handler) {
+    if (! handlers) {
       // If we don't have an extension handler, serve this file as a
       // static resource on the client, or ignore it on the server.
       //
@@ -734,16 +726,17 @@ var compileUnibuild = function (options) {
         });
       }
     };
+    _.each(handlers, function(handler){
+      try {
+        (buildmessage.markBoundary(handler.handler))(compileStep);
+      } catch (e) {
+        e.message = e.message + " (compiling " + relPath + ")";
+        buildmessage.exception(e);
 
-    try {
-      (buildmessage.markBoundary(handler))(compileStep);
-    } catch (e) {
-      e.message = e.message + " (compiling " + relPath + ")";
-      buildmessage.exception(e);
-
-      // Recover by ignoring this source file (as best we can -- the
-      // handler might already have emitted resources)
-    }
+        // Recover by ignoring this source file (as best we can -- the
+        // handler might already have emitted resources)
+      }
+    });
   });
 
   // *** Run Phase 1 link
